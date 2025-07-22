@@ -1,18 +1,7 @@
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- Categories table
-CREATE TABLE categories (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  name VARCHAR(100) NOT NULL UNIQUE,
-  description TEXT,
-  price INTEGER NOT NULL DEFAULT 500, -- Price in kopecks (500 = 5 rubles)
-  is_active BOOLEAN DEFAULT true,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
-
--- Users table
+-- Создаем таблицу пользователей
 CREATE TABLE users (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
   telegram_id BIGINT NOT NULL UNIQUE,
@@ -26,70 +15,37 @@ CREATE TABLE users (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Subscriptions table
-CREATE TABLE subscriptions (
+-- Создаем таблицу для кармы автомобилей
+CREATE TABLE car_karma (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  category_id UUID NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
-  is_active BOOLEAN DEFAULT true,
-  expires_at TIMESTAMP WITH TIME ZONE,
+  plate_number VARCHAR(20) NOT NULL UNIQUE,
+  karma INTEGER DEFAULT 0,
+  total_positive INTEGER DEFAULT 0,
+  total_negative INTEGER DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  
-  UNIQUE(user_id, category_id)
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Jobs table
-CREATE TABLE jobs (
+-- Создаем таблицу для логирования действий пользователей
+CREATE TABLE karma_actions (
   id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  external_id VARCHAR(200) UNIQUE,
-  title VARCHAR(500) NOT NULL,
+  car_karma_id UUID NOT NULL REFERENCES car_karma(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  action_type VARCHAR(20) NOT NULL CHECK (action_type IN ('positive', 'negative')),
+  karma_change INTEGER NOT NULL,
   description TEXT,
-  category_id UUID NOT NULL REFERENCES categories(id),
-  budget_min INTEGER,
-  budget_max INTEGER,
-  currency VARCHAR(10) DEFAULT 'RUB',
-  url VARCHAR(1000) NOT NULL,
-  source VARCHAR(100) NOT NULL, -- freelance.ru, fl.ru, upwork, etc.
-  published_at TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Payments table
-CREATE TABLE payments (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id),
-  category_id UUID NOT NULL REFERENCES categories(id),
-  amount INTEGER NOT NULL,
-  currency VARCHAR(10) DEFAULT 'RUB',
-  payment_provider VARCHAR(50) DEFAULT 'telegram',
-  provider_payment_id VARCHAR(200),
-  status VARCHAR(20) DEFAULT 'pending', -- pending, completed, failed, refunded
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  completed_at TIMESTAMP WITH TIME ZONE
-);
-
--- Sent jobs table (to avoid duplicate sends)
-CREATE TABLE sent_jobs (
-  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-  user_id UUID NOT NULL REFERENCES users(id),
-  job_id UUID NOT NULL REFERENCES jobs(id),
-  sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  
-  UNIQUE(user_id, job_id)
-);
-
--- Create indexes
+-- Создаем индексы для оптимизации
 CREATE INDEX idx_users_telegram_id ON users(telegram_id);
-CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
-CREATE INDEX idx_subscriptions_category_id ON subscriptions(category_id);
-CREATE INDEX idx_jobs_category_id ON jobs(category_id);
-CREATE INDEX idx_jobs_published_at ON jobs(published_at);
-CREATE INDEX idx_jobs_source ON jobs(source);
-CREATE INDEX idx_payments_user_id ON payments(user_id);
-CREATE INDEX idx_sent_jobs_user_id ON sent_jobs(user_id);
+CREATE INDEX idx_car_karma_plate_number ON car_karma(plate_number);
+CREATE INDEX idx_car_karma_karma ON car_karma(karma);
+CREATE INDEX idx_karma_actions_car_karma_id ON karma_actions(car_karma_id);
+CREATE INDEX idx_karma_actions_user_id ON karma_actions(user_id);
+CREATE INDEX idx_karma_actions_created_at ON karma_actions(created_at);
 
--- Update timestamps trigger function
+-- Функция для обновления updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -98,7 +54,11 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Add update triggers
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_categories_updated_at BEFORE UPDATE ON categories FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_subscriptions_updated_at BEFORE UPDATE ON subscriptions FOR EACH ROW EXECUTE FUNCTION update_updated_at_column(); 
+-- Добавляем триггеры для обновления updated_at
+CREATE TRIGGER update_users_updated_at 
+  BEFORE UPDATE ON users 
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_car_karma_updated_at 
+  BEFORE UPDATE ON car_karma 
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
